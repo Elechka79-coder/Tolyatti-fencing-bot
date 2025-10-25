@@ -1,8 +1,24 @@
+import os
+import sys
+import time
 import logging
 import sqlite3
-import os
 import telebot
 from telebot import types
+
+# Проверка на множественный запуск
+def check_running():
+    import subprocess
+    result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+    processes = result.stdout
+    
+    bot_processes = [line for line in processes.split('\n') if 'python bot.py' in line and 'grep' not in line]
+    
+    if len(bot_processes) > 1:
+        print("❌ Уже запущен другой экземпляр бота! Завершаем...")
+        sys.exit(1)
+
+check_running()
 
 # Настройки из переменных окружения
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -230,3 +246,4 @@ if __name__ == '__main__':
     init_db()
     print("🤺 Бот Тольяттинской федерации фехтования запущен!")
     bot.infinity_polling()
+
