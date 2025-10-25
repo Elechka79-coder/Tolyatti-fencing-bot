@@ -2,7 +2,8 @@ import logging
 import sqlite3
 import os
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+from telegram.ext import (Application, CommandHandler, MessageHandler, 
+                         filters, ContextTypes, ConversationHandler)
 
 # Настройки из переменных окружения
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -10,7 +11,7 @@ MANAGER_CHAT_ID = os.getenv('MANAGER_CHAT_ID')
 
 # Проверка токена
 if not BOT_TOKEN:
-    logging.error("❌ BOT_TOKEN не установлен!")
+    print("❌ BOT_TOKEN не установлен!")
     exit(1)
 
 # Состояния диалога
@@ -19,11 +20,7 @@ NAME, PHONE, AGE, EXPERIENCE = range(4)
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    level=logging.INFO
 )
 
 # Инициализация базы данных
@@ -41,7 +38,7 @@ def init_db():
                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     conn.commit()
     conn.close()
-    logging.info("✅ База данных готова")
+    print("✅ База данных готова")
 
 def save_application(user_id, username, first_name, phone, age, experience):
     conn = sqlite3.connect('fencing_applications.db')
@@ -52,7 +49,7 @@ def save_application(user_id, username, first_name, phone, age, experience):
               (user_id, username, first_name, phone, age, experience))
     conn.commit()
     conn.close()
-    logging.info(f"✅ Заявка сохранена: {first_name}, {phone}")
+    print(f"✅ Заявка сохранена: {first_name}, {phone}")
 
 def get_applications_count():
     conn = sqlite3.connect('fencing_applications.db')
@@ -64,7 +61,7 @@ def get_applications_count():
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logging.info(f"Пользователь {update.message.from_user.id} начал диалог")
+    print(f"Пользователь {update.message.from_user.id} начал диалог")
     
     welcome_text = """
 🤺 Добро пожаловать в Тольяттинскую федерацию фехтования!
@@ -84,7 +81,7 @@ async def process_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['username'] = update.message.from_user.username
     context.user_data['user_id'] = update.message.from_user.id
     
-    logging.info(f"Пользователь ввел имя: {name}")
+    print(f"Пользователь ввел имя: {name}")
     
     phone_text = f"Приятно познакомиться, {name}! 📞"
     
@@ -103,9 +100,9 @@ async def process_contact_button(update: Update, context: ContextTypes.DEFAULT_T
     phone = contact.phone_number
     context.user_data['phone'] = phone
     
-    logging.info(f"Получен контакт через кнопку: {phone}")
+    print(f"Получен контакт через кнопку: {phone}")
     
-    await ask_age(update, context)
+    await update.message.reply_text("🎯 Сколько вам лет?", reply_markup=ReplyKeyboardRemove())
     return AGE
 
 # Обработка выбора ручного ввода
@@ -116,8 +113,6 @@ async def process_manual_phone(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=ReplyKeyboardRemove()
         )
         return PHONE
-    else:
-        return await process_phone_text(update, context)
 
 # Обработка ручного ввода телефона
 async def process_phone_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -127,13 +122,8 @@ async def process_phone_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return PHONE
     
     context.user_data['phone'] = phone
-    logging.info(f"Получен контакт вручную: {phone}")
+    print(f"Получен контакт вручную: {phone}")
     
-    await ask_age(update, context)
-    return AGE
-
-# Запрос возраста
-async def ask_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎯 Сколько вам лет?")
     return AGE
 
@@ -146,7 +136,7 @@ async def process_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return AGE
         
         context.user_data['age'] = age
-        logging.info(f"Пользователь ввел возраст: {age}")
+        print(f"Пользователь ввел возраст: {age}")
         
         keyboard = [
             [KeyboardButton("Новичок")],
@@ -191,9 +181,9 @@ async def process_experience(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     try:
         await context.bot.send_message(chat_id=MANAGER_CHAT_ID, text=manager_message)
-        logging.info("✅ Уведомление отправлено менеджеру")
+        print("✅ Уведомление отправлено менеджеру")
     except Exception as e:
-        logging.error(f"❌ Ошибка отправки менеджеру: {e}")
+        print(f"❌ Ошибка отправки менеджеру: {e}")
     
     success_text = f"""
 ✅ Спасибо, {context.user_data['first_name']}! Ваша заявка принята!
@@ -205,13 +195,17 @@ async def process_experience(update: Update, context: ContextTypes.DEFAULT_TYPE)
 """
     
     await update.message.reply_text(success_text, reply_markup=ReplyKeyboardRemove())
-    logging.info("✅ Диалог завершен успешно")
+    print("✅ Диалог завершен успешно")
     return ConversationHandler.END
 
 # Отмена диалога
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text('Диалог отменен. Для начала отправьте /start', reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
+
+# Обработка неизвестных сообщений
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Для записи на тренировку отправьте /start")
 
 # Основная функция
 def main():
@@ -225,7 +219,7 @@ def main():
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_name)],
             PHONE: [
                 MessageHandler(filters.CONTACT, process_contact_button),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, process_manual_phone)
+                MessageHandler(filters.TEXT & ~filters.COMMAND, process_phone_text)
             ],
             AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_age)],
             EXPERIENCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_experience)]
@@ -234,8 +228,9 @@ def main():
     )
     
     application.add_handler(conv_handler)
+    application.add_handler(MessageHandler(filters.TEXT, unknown))
     
-    logging.info("🤺 Бот запущен на PythonAnywhere!")
+    print("🤺 Бот Тольяттинской федерации фехтования запущен!")
     application.run_polling()
 
 if __name__ == '__main__':
