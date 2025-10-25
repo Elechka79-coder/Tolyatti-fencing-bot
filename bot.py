@@ -1,37 +1,67 @@
-import os
-import sys
-import time
 import logging
 import sqlite3
+import os
 import telebot
 from telebot import types
+from flask import Flask
+from threading import Thread
+import datetime
 
-# Проверка на множественный запуск
-def check_running():
-    import subprocess
-    result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-    processes = result.stdout
-    
-    bot_processes = [line for line in processes.split('\n') if 'python bot.py' in line and 'grep' not in line]
-    
-    if len(bot_processes) > 1:
-        print("❌ Уже запущен другой экземпляр бота! Завершаем...")
-        sys.exit(1)
+# ==================== НАСТРОЙКИ ====================
+# Эти переменные нужно установить в Secrets на Replit:
+# BOT_TOKEN = ваш_токен_бота
+# MANAGER_CHAT_ID = ваш_id_администратора
 
-check_running()
-
-# Настройки из переменных окружения
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 MANAGER_CHAT_ID = os.getenv('MANAGER_CHAT_ID')
 
+# Проверка токена
 if not BOT_TOKEN:
-    print("❌ BOT_TOKEN не установлен!")
+    print("❌ ОШИБКА: BOT_TOKEN не установлен!")
+    print("📝 На Replit зайдите в Secrets и установите BOT_TOKEN")
     exit(1)
 
-# Создаем бота
+if not MANAGER_CHAT_ID:
+    print("❌ ОШИБКА: MANAGER_CHAT_ID не установлен!")
+    print("📝 На Replit зайдите в Secrets и установите MANAGER_CHAT_ID")
+    exit(1)
+
+# ==================== FLASK ДЛЯ АКТИВНОСТИ ====================
+# Это нужно чтобы Replit не "засыпал"
+app = Flask('')
+
+@app.route('/')
+def home():
+    return f"""
+    <html>
+        <head>
+            <title>Тольяттинская федерация фехтования</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                h1 {{ color: #2c3e50; }}
+                .status {{ color: #27ae60; font-weight: bold; }}
+            </style>
+        </head>
+        <body>
+            <h1>🤺 Тольяттинская федерация фехтования</h1>
+            <p class="status">✅ Телеграм-бот работает!</p>
+            <p>Время: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            <p>Для записи на тренировки напишите боту в Telegram</p>
+        </body>
+    </html>
+    """
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# ==================== НАСТРОЙКА БОТА ====================
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Состояния диалога (храним в памяти)
+# Хранилище данных пользователей (в памяти)
 user_data = {}
 
 # Настройка логирования
@@ -40,8 +70,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Инициализация базы данных
+# ==================== БАЗА ДАННЫХ ====================
 def init_db():
+    """Создаем базу данных для заявок"""
     conn = sqlite3.connect('fencing_applications.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS applications
@@ -58,6 +89,7 @@ def init_db():
     print("✅ База данных готова")
 
 def save_application(user_id, username, first_name, phone, age, experience):
+    """Сохраняем заявку в базу данных"""
     conn = sqlite3.connect('fencing_applications.db')
     c = conn.cursor()
     c.execute('''INSERT INTO applications 
@@ -69,6 +101,7 @@ def save_application(user_id, username, first_name, phone, age, experience):
     print(f"✅ Заявка сохранена: {first_name}, {phone}")
 
 def get_applications_count():
+    """Получаем количество заявок"""
     conn = sqlite3.connect('fencing_applications.db')
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM applications")
@@ -76,9 +109,10 @@ def get_applications_count():
     conn.close()
     return count
 
-# Команда /start
+# ==================== КОМАНДЫ БОТА ====================
 @bot.message_handler(commands=['start'])
 def start_message(message):
+    """Обработчик команды /start"""
     user_id = message.from_user.id
     user_data[user_id] = {'step': 'name'}
     
@@ -91,12 +125,17 @@ def start_message(message):
 """
     
     bot.send_message(message.chat.id, welcome_text, reply_markup=types.ReplyKeyboardRemove())
+    print(f"👤 Пользователь {user_id} начал диалог")
 
-# Обработка имени
 @bot.message_handler(func=lambda message: user_data.get(message.from_user.id, {}).get('step') == 'name')
 def process_name(message):
+    """Обработка имени пользователя"""
     user_id = message.from_user.id
-    name = message.text
+    name = message.text.strip()
+    
+    if len(name) < 2:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, введите настоящее имя:")
+        return
     
     user_data[user_id] = {
         'step': 'phone',
@@ -105,10 +144,11 @@ def process_name(message):
         'user_id': user_id
     }
     
-    print(f"Пользователь ввел имя: {name}")
+    print(f"👤 Пользователь {user_id} ввел имя: {name}")
     
     phone_text = f"Приятно познакомиться, {name}! 📞"
     
+    # Создаем клавиатуру с кнопками
     keyboard = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
     button_contact = types.KeyboardButton("📞 Поделиться номером", request_contact=True)
     button_manual = types.KeyboardButton("📝 Ввести номер вручную")
@@ -116,9 +156,9 @@ def process_name(message):
     
     bot.send_message(message.chat.id, phone_text, reply_markup=keyboard)
 
-# Обработка контакта через кнопку
 @bot.message_handler(content_types=['contact'])
 def process_contact(message):
+    """Обработка контакта через кнопку"""
     user_id = message.from_user.id
     if user_data.get(user_id, {}).get('step') != 'phone':
         return
@@ -127,34 +167,37 @@ def process_contact(message):
     user_data[user_id]['phone'] = phone
     user_data[user_id]['step'] = 'age'
     
-    print(f"Получен контакт через кнопку: {phone}")
+    print(f"📞 Пользователь {user_id} поделился номером: {phone}")
     
     bot.send_message(message.chat.id, "🎯 Сколько вам лет?", reply_markup=types.ReplyKeyboardRemove())
 
-# Обработка ручного ввода телефона
 @bot.message_handler(func=lambda message: user_data.get(message.from_user.id, {}).get('step') == 'phone')
 def process_phone_text(message):
+    """Обработка ручного ввода телефона"""
     user_id = message.from_user.id
     
     if message.text == "📝 Ввести номер вручную":
         bot.send_message(message.chat.id, "Введите ваш номер телефона:", reply_markup=types.ReplyKeyboardRemove())
         return
     
-    phone = message.text
-    if not any(char.isdigit() for char in phone) or len(phone) < 10:
-        bot.send_message(message.chat.id, "❌ Пожалуйста, введите корректный номер телефона:")
+    phone = message.text.strip()
+    
+    # Простая проверка номера
+    digits = ''.join(filter(str.isdigit, phone))
+    if len(digits) < 10:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, введите корректный номер телефона (например: 89991234567):")
         return
     
     user_data[user_id]['phone'] = phone
     user_data[user_id]['step'] = 'age'
     
-    print(f"Получен контакт вручную: {phone}")
+    print(f"📞 Пользователь {user_id} ввел номер: {phone}")
     
     bot.send_message(message.chat.id, "🎯 Сколько вам лет?")
 
-# Обработка возраста
 @bot.message_handler(func=lambda message: user_data.get(message.from_user.id, {}).get('step') == 'age')
 def process_age(message):
+    """Обработка возраста"""
     user_id = message.from_user.id
     
     try:
@@ -166,8 +209,9 @@ def process_age(message):
         user_data[user_id]['age'] = age
         user_data[user_id]['step'] = 'experience'
         
-        print(f"Пользователь ввел возраст: {age}")
+        print(f"🎯 Пользователь {user_id} ввел возраст: {age}")
         
+        # Клавиатура с вариантами опыта
         keyboard = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
         keyboard.add(
             types.KeyboardButton("Новичок"),
@@ -180,9 +224,9 @@ def process_age(message):
     except ValueError:
         bot.send_message(message.chat.id, "❌ Пожалуйста, введите возраст цифрами:")
 
-# Обработка опыта и сохранение заявки
 @bot.message_handler(func=lambda message: user_data.get(message.from_user.id, {}).get('step') == 'experience')
 def process_experience(message):
+    """Обработка опыта и сохранение заявки"""
     user_id = message.from_user.id
     experience = message.text
     user_data[user_id]['experience'] = experience
@@ -224,26 +268,64 @@ def process_experience(message):
 🏅 Тольяттинская федерация фехтования
 📞 Наш менеджер свяжется с вами в течение 24 часов
 
+📍 Адрес: г. Тольятти, ул. Спортивная, 15
+📅 Расписание: Пн-Пт 18:00-21:00, Сб 10:00-14:00
+
 Для новой заявки отправьте /start
 """
     
     bot.send_message(message.chat.id, success_text, reply_markup=types.ReplyKeyboardRemove())
     
     # Очищаем данные пользователя
-    user_data.pop(user_id, None)
-    print("✅ Диалог завершен успешно")
+    if user_id in user_data:
+        del user_data[user_id]
+    
+    print(f"✅ Диалог с пользователем {user_id} завершен успешно")
 
-# Обработка неизвестных сообщений
+@bot.message_handler(commands=['stats'])
+def show_stats(message):
+    """Показывает статистику (только для администратора)"""
+    if str(message.from_user.id) != MANAGER_CHAT_ID:
+        bot.send_message(message.chat.id, "❌ Эта команда доступна только администратору")
+        return
+    
+    count = get_applications_count()
+    bot.send_message(message.chat.id, f"📊 Статистика заявок:\nВсего заявок: {count}")
+
 @bot.message_handler(func=lambda message: True)
 def unknown_message(message):
+    """Обработка любых других сообщений"""
     if message.text.startswith('/'):
-        bot.send_message(message.chat.id, "Для записи на тренировку отправьте /start")
+        bot.send_message(message.chat.id, "❌ Неизвестная команда\nДля записи на тренировку отправьте /start")
     else:
-        bot.send_message(message.chat.id, "Для начала диалога отправьте /start")
+        bot.send_message(message.chat.id, "🤺 Для записи на тренировку отправьте /start")
 
-# Запуск бота
-if __name__ == '__main__':
+# ==================== ЗАПУСК БОТА ====================
+def main():
+    """Основная функция запуска"""
+    print("=" * 50)
+    print("🤺 Запуск бота Тольяттинской федерации фехтования")
+    print("=" * 50)
+    
+    # Запускаем Flask для поддержания активности
+    keep_alive()
+    print("✅ Flask сервер запущен")
+    
+    # Инициализируем базу данных
     init_db()
-    print("🤺 Бот Тольяттинской федерации фехтования запущен!")
-    bot.infinity_polling()
+    
+    print("✅ Бот готов к работе!")
+    print("📝 Логи будут отображаться ниже...")
+    
+    # Запускаем бота
+    try:
+        bot.infinity_polling()
+    except Exception as e:
+        print(f"❌ Ошибка в работе бота: {e}")
+        print("🔄 Перезапуск через 10 секунд...")
+        import time
+        time.sleep(10)
+        main()  # Перезапуск
 
+if __name__ == '__main__':
+    main()
